@@ -5,11 +5,14 @@ const randomstring = require("randomstring");
 const { mailgun } = require("../config/mail");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcrypt");
+const {sqlQuery }= require("../helper/Promesse")
+const {validation} = require("../helper/validation")
+const {Email} = require("../models/Email");
+const { SendEmail } = require("../helper/Email");
 
 
-      exports.register = (req, resp) => {
+      exports.register = async (req, resp) => {
 
-        
         //fetch data
         let newuser = new user(
           req.body.firstname,
@@ -17,63 +20,17 @@ const bcrypt = require("bcrypt");
           req.body.email,
                 req.body.password,
         );
-       
-    
+
         //validation des données
+       
+        if(validation(newuser)) resp.status(403).json({message : validation(newuser)})
+
+        else {
     
-        // FirstName
-        if (newuser.firstname.length < 4 || newuser.firstname.length > 20) {
-          resp.status(403).json({message :"<h1>firstname should contain from 4 to 20 caracters</h1>"});
-          return;
-        }
+         try{
     
-        //LastName
-        if (newuser.lastname.length < 4 || newuser.lastname.length > 20) {
-          resp.status(403).json({message :"<h1>lastname should contain from 4 to 20 caracters</h1>"});
-          return;
-        }
-    
-        //PassWord
-        let pattern = /^(?=.*[0-9])(?=.*[!@#$%^&*])[a-zA-Z0-9!@#$%^&*]{8,12}$/
-    
-        if (
-          pattern.test(newuser.password) === false
-          
-        ) {
-            
-          resp.status(403).json({message :"<h1>The password should contain minimum eight characters, at least one uppercase letter, one lowercase letter, one number and one special character</h1>"});
-          return;
-        }
-    
-        //Username Email
-        let pattern_email = /^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,5})$/
-    
-    
-       if (
-          pattern_email.test(newuser.email) === false
-          
-        ) {
-            
-          resp.status(403).json({message :"<h1>Email Should be like : Example@Example.com</h1>"});
-          return;
-        }
-    
-    
-        // Avatar
-        /*if (
-          newuser.avattar.startsWith("https://") === false
-          
-        ) {
-            
-          resp.send("<h1>The avatar should be a secure link</h1>");
-          return;
-        }*/
-    
-    
-         DB.query(`SELECT *  FROM Users WHERE EMAIL = '${newuser.email}'`, (err,res)=>{
-    
-          if (err) throw err
-          else {
+         let res = await sqlQuery(`SELECT *  FROM Users WHERE EMAIL = '${newuser.email}'`)
+          console.log(res)
     
            if(res.length === 0){
     
@@ -90,71 +47,34 @@ const bcrypt = require("bcrypt");
               let endpoint = `http://localhost:9000/api/verify-email/${newuser.email}/code/${newuser.token}`
     
               //send the mail
-    
-              let transporter = nodemailer.createTransport({
-                host: "smtp.mailgun.org",
-                port: 587,
-                secure : false, // true for 465, false for other ports
-                auth: {
-                  user: mailgun.usename, // generated ethereal user
-                  pass: mailgun.password, // generated ethereal password
-                },
-              });
-    
-              let message = {
-                from: ' <support.imane@gmail.com>', // sender address
-                to: newuser.email, // list of receivers
-                subject: "email verification ✔", // Subject line
-                html: `<h1>thanks for your registration</h1>
+
+              let userInfo = new Email(
+
+                'imane@support.com',
+                newuser.email,
+                "email verification ✔",
+                `<h1>thanks for your registration</h1>
                 Click the link below to verify your email
                 <a href=${endpoint}>Verify</a>
                 the link will be expired after 24 hours 
-                `// html body
-                ,
-                tls:{ 
-                  rejectUnauthorized:false
-                }
-              };
-    
-              //send the email
-    
-              transporter.sendMail(message, (err,info)=>{
-    
-                if(err) console.log(err.message)
-                else{
-                  console.log(info)
-                }
-    
-    
-              })
-    
+                `,
+                endpoint
+
+              )
+
               //insert user 
                
-              bcrypt.hash(newuser.password, 10, (err , str)=>{
-    
-                newuser.password = str;
-                console.log(newuser.password)
+              let result = await bcrypt.hash(newuser.password, 10 )
+                newuser.password = result;
+
                 
                 let query = `INSERT INTO Users Set ?`
     
-              DB.query(query, newuser, (err,res)=>{
-    
-    
-                if(err) throw err
-                else{
-    
-                  resp.send("user added succesfully");
-                }
-    
-    
-              })
-    
-                        })
-          
+                  if(sqlQuery(query, newuser)) SendEmail(userInfo)      
               
             }else{
-    
-              if(res[0].isverified){
+             
+              if(res[0].ISVERIFIED){
     
                 resp.status(201).json({message :"<h1>username already exists</h1>"})
     
@@ -165,84 +85,68 @@ const bcrypt = require("bcrypt");
     
             }
     
-          }
+         }catch(err){
+
+          console.log(err.message)
+
+
+         }
+        }
+         
+        }
     
-         })
-        
-        //console.log("add user to database");
+     exports.verify = async (Req, Resp)=>{
+
     
-      }
-
-     exports.verify = (Req, Resp)=>{
-
-       const front = () =>{
-
-         Axios.get('http://localhost:3000/api/login')
-        .then(data=>console.log(data))
-        .catch(err=>console.log(err))
-
-
-       }
-
         let email = Req.params.email;
         let Token = Req.params.token;
    
-        DB.query(`SELECT  EXPIRATION_DATE FROM Users WHERE EMAIL ='${email}' and TOKEN=${Token} `,(err, res)=>{
+        let res = await sqlQuery(`SELECT  EXPIRATION_DATE FROM Users WHERE EMAIL ='${email}' and TOKEN='${Token}' `)
    
-         if(err) throw err
-         else{
-      
          if(res.length === 0){
    
-           Req.send("Token or Email are unvalid");
-           console.log("Token or Email are unvalid");
+           Resp.status(201).json({message :"Token or Email are unvalid"})
    
          }else{
    
            if(Date.now()> res[0].EXPIRATION_DATE){
+
+            let link = `http://localhost:9000/api/resend/${email}/code/${Token}`
              
-             Resp.send("Token has already expired");
-   
+            Resp.send(`
+                 
+                 <h1>This link has already expired</h1>
+                 <h5>Click on <a href= ${link}> resend </a>to get a valid link </h5>       
+                 `)     
    
            }else{
            
-              DB.query(`UPDATE Users SET ISVERIFIED = "1" , TOKEN = "" WHERE EMAIL ='${email}'`, (err, res)=>{
+              let rest = await sqlQuery(`UPDATE Users SET ISVERIFIED = "1" , TOKEN = "" WHERE EMAIL ='${email}'`)
                
-               if(err) throw err
-               else{
-   
+               
                  Resp.send(`
                  
                  <h1>You account has been verified</h1>
-                 <button>Login in</button>
+                 <a href= "http://localhost:3000/Login">Login in</a>
                  
-                 `)
-               }
-   
-   
-              })
-              
+                 `)     
    
            }
          }
-       }
+       
    
-        })
+        
     
    
      }
 
-     exports.resend = (Req, Resp)=>{
+     exports.resend = async (Req, Resp)=>{
 
         let email = Req.params.email;
         let Token = Req.params.token;
 
-        DB.query(`SELECT  EXPIRATION_DATE FROM Users WHERE EMAIL ='${email}' and TOKEN='${Token}' `,(err, res)=>{
-
-           if(err) throw err
-           else{
-
-              if(res.length === 0){
+        let res = await sqlQuery(`SELECT  EXPIRATION_DATE FROM Users WHERE EMAIL ='${email}' and TOKEN='${Token}' `)
+            if(res.length === 0){
                 
                Resp.send("<h1>The email doesn't exists</h1>")
 
@@ -250,256 +154,181 @@ const bcrypt = require("bcrypt");
               }else{
                
 
-               let date = new Date (Date.now() + 24 *60 *60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
-               
-        
-    
-               
-                  
-       DB.query(`UPDATE Users SET  EXPIRATION_DATE = '${date}' WHERE EMAIL ='${email}'`, (err, res)=>{
-           
-           if(err) throw err
-           else{
+      let date = new Date (Date.now() + 24 *60 *60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
-             console.log("Expiration date updated")
-           }
-
-
-          })
-
+   
            //create de endpoint of the api 
          let endpoint = `http://localhost:9000/api/resend/${email}/code/${Token}`
 
          //send the mail
 
-         let transporter = nodemailer.createTransport({
-           host: "smtp.mailgun.org",
-           port: 587,
-           secure : false, // true for 465, false for other ports
-           auth: {
-             user: mailgun.usename, // generated ethereal user
-             pass: mailgun.password, // generated ethereal password
-           },
-            tls:{ 
-             rejectUnauthorized:false
-           }
-         });
 
-         let message = {
-           from: ' <support.imane@gmail.com>', // sender address
-           to: email, // list of receivers
-           subject: "email verification ✔", // Subject line
-           html: `<h1>thanks for your registration</h1>
-           Click the link below to verify your email
-           <a href=${endpoint}>Verify</a>
-           the link will be expired after 24 hours 
-           `// html body
-           ,
+         let userInfo = new Email(
+
+          'imane@support.com',
+          email,
+          "email verification ✔",
+          `<h1>thanks for your registration</h1>
+          Click the link below to verify your email
+          <a href=${endpoint}>Verify</a>
+          the link will be expired after 24 hours 
+          `,
+          endpoint
+
+        )
+
+                        
+        if(sqlQuery(`UPDATE Users SET  EXPIRATION_DATE = '${date}' WHERE EMAIL ='${email}'`)){
           
-         };
-
-         //send the email
-
-         transporter.sendMail(message, (err,info)=>{
-
-           if(err) console.log(err.message)
-           else{
-             console.log(info)
-           }
-
-
-         })
-
+          SendEmail(userInfo)
+         
+          Resp.send("<h1> Check your email to verify your account </h1>")
+        
               }
-        }
- })
+        
+ 
      }   
+    }
 
-     exports.forgot = (Req, Resp)=>{
+     exports.forgot = async (Req, Resp)=>{
 
         let email = Req.params.email
-        DB.query(`SELECT ISVERIFIED FROM Users WHERE EMAIL ='${email}'`,(err, res)=>{
+
+        let res = await sqlQuery(`SELECT ISVERIFIED FROM Users WHERE EMAIL ='${email}'`)
      
-         if(err) throw err
-         else{
-       
            if(res.length === 0){
-     
-               Resp.send("<h1>Email not found</h1>")
+    
+               Resp.status(201).json({message :"Email not found"})
      
            }else {
            
              if(!res[0].ISVERIFIED){
-     
-               Resp.send("<h1>you should verify your account </h1>")
+    
+               Resp.status(201).json({message :"You account is not verified"})
              }
+            
      
              else{
      
-               let date = Date.now() + 24 * 60 * 60 * 1000
+              let date = new Date (Date.now() + 24 *60 *60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
                let token = randomstring.generate();
-                  
-               DB.query(`UPDATE Users SET TOKEN = ${token} EXPIRATION_DATE = ${date}   WHERE EMAIL =${email}`, (err, res)=>{
-                 
-                 if(err) throw err
-                 else{
-     
-                   console.log("Data Updated")
-                 }
-     
-     
-                })
-     
+                
                 //create de endpoint of the api 
-               let endpoint = `http://localhost:9000/api/resetpassword/${email}/code/${token}`
+               let endpoint = `http://localhost:3000/ResetPass/${email}/code/${token}`
      
                //send the mail
      
-               let transporter = nodemailer.createTransport({
-                 host: "smtp.mailgun.org",
-                 port: 587,
-                 secure : false, // true for 465, false for other ports
-                 auth: {
-                   user: mailgun.usename, // generated ethereal user
-                   pass: mailgun.password, // generated ethereal password
-                 },
-                  tls:{ 
-                   rejectUnauthorized:false
-                 }
-               });
-     
-               let message = {
-                 from: ' <support.imane@gmail.com>', // sender address
-                 to: newuser.email, // list of receivers
-                 subject: "email verification ✔", // Subject line
-                 html: `<h1>thanks for your registration</h1>
-                 Click the link below to verify your email
-                 <a href=${endpoint}>Verify</a>
+       let userinfo = new Email(
+                 ' <support.imane@gmail.com>', 
+                 email,
+                 "Reset your password ✔",
+                 `<h1>You requested to reset your password</h1>
+                 Click the link below to change the password
+                (<a href=${endpoint}>reset password</a>)
                  the link will be expired after 24 hours 
-                 `// html body
+                 `, 
+                 endpoint
+
+       )
+
+         
+       if(sqlQuery(` UPDATE Users SET TOKEN = '${token}', EXPIRATION_DATE = '${date}'  WHERE EMAIL ='${email}'`)){
+
+         SendEmail(userinfo)
+
+         Resp.send(`
                  
-                
-               };
-     
-               //send the email
-     
-               transporter.sendMail(message, (err,info)=>{
-     
-                 if(err) console.log(err.message)
-                 else{
-                   console.log(info)
-                 }
-     
-     
-               })
-     
-     
-     
-     
+                 <h1> Please check your email  </h1>
+                 
+                 `) 
              }
      
      
            }
-     
-         }
-     
-        })
-     
+
+          }
      }
 
-     exports.resetPass = (Req, Resp)=>{
+     exports.resetPass = async(Req, Resp)=>{
 
         let email = Req.params.email;
         let Token = Req.params.token;
+
+        let pass = Req.body
+
+        console.log(pass)
     
-        DB.query(`SELECT  EXPIRATION_DATE FROM Users WHERE EMAIL =${email} and TOKEN=${Token} `,(err, res)=>{
-    
-            if(err) throw err
-            else{
-            
+        let res = await sqlQuery(`SELECT  EXPIRATION_DATE FROM Users WHERE EMAIL ='${email}' and TOKEN='${Token}' `)
+     
               if(res.length === 0){
-    
-                Resp.send("<h1>Invalid Token</h1>")
+  
+                Resp.status(201).json({message :"Invalid Token"})
+                
               }else{
     
                 if(res[0].EXPIRATION_DATE< Date.now()){
     
-                   Resp.send("<h1>Token has already expired</h1>")
+                  Resp.send(`
+                 
+                  <h1>This link has already expired</h1>
+                  <h5>Click on <a href=""> resend </a>to get a valid link </h5>       
+                  `)     
     
                 }else {
-    
-                DB.query(`UPDATE Users SET PASSWORD ='Newpass' WHERE EMAIL =${email}`, (err, res)=>{
+
+                  let result = await bcrypt.hash(pass.password, 10)
+
+                if (sqlQuery(`UPDATE Users SET PASSWORD = '${result}' WHERE EMAIL ='${email}'`))
+               
+                Resp.send(`
+                 
+                <h1> Password changed successfully </h1>
+                <a href= "http://localhost:3000/Login">Login in to your account</a>
                 
-                if(err) throw err
-                else{
+                `)     
+
     
-                  console.log("Data Updated")
-                }
-    
-    
-               })
-    
-                   Resp.send("Password changes successfully ")
-    
-    
-    
-    
-                }
-    
-    
+              }
     
               }
     
     
-            }
+            
     
     
-        })
+        
     
     
     
     
     }
 
-    exports.login = (Req, Resp)=>{
+    exports.login = async (Req, Resp)=>{
 
 let email = Req.params.email;
 let pass = Req.params.password;
 
-DB.query(` Select * from Users where EMAIL = '${email}'`, (err,res)=>{
+let res = await sqlQuery(` Select * from Users where EMAIL = '${email}'`)
 
-if (err) throw  err 
-else{
- 
   if(res.length === 0){
 
-    Resp.send("<h1>Invalid Email</h1>")
+    Resp.status(201).json({message :"Invalid Email"})
 
   }else{
 
-    let Bool = false;
+   bcrypt.compare(pass,res[0].PASSWORD, (err, result)=>{
+     console.log(result)
 
-    bcrypt.compare(pass,res[0].PASSWORD , function(err, result) {
-    
-      console.log(result)
-        if(!result) Resp.send("<h1>incorrect password</h1>")
+    if(!result)
+   Resp.status(201).json({message :"Incorrect password"})
     else{
-     
-      Resp.send("<h1>You are loged in </h1>")
-
-
+    
+      Resp.status(201).json({message :"You are loged in"})
     }
-      });
-      
 
-   
+   })
+  
 
   }
-
-
-}
-
-
-})
 
      }

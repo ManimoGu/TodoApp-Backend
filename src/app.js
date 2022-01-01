@@ -95,9 +95,9 @@ app.get(`${API_URL.user}/:userid/todos`, (httpReq, httpResp) => {
 
   app.get("/api/resend/:email/code/:token", resend)
 
-  app.get("/api/fogot_password/:email",forgot)
+  app.post("/api/fogot_password/:email",forgot)
 
-  app.get("/api/resetpassword/:email/code/:token",resetPass)
+  app.post("/api/resetpassword/:email/code/:token",resetPass)
   
 // login 
-app.get("/api/Login/:email/pass/:password", login)
+app.post("/api/Login/:email/pass/:password", login)
